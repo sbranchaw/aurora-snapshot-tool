@@ -23,6 +23,7 @@ from snapshots_tool_utils import *
 LOGLEVEL = os.getenv('LOG_LEVEL').strip()
 BACKUP_INTERVAL = int(os.getenv('INTERVAL', '24'))
 PATTERN = os.getenv('PATTERN', 'ALL_CLUSTERS')
+SHARE_SNAPSHOTS = os.getenv('SHARE_SNAPSHOTS', 'NONE')
 SNAPSHOT_NAME_PREFIX = os.getenv('SNAPSHOT_NAME_PREFIX', 'NONE')
 
 if os.getenv('REGION_OVERRIDE', 'NO') != 'NO':
@@ -71,12 +72,20 @@ def lambda_handler(event, context):
                 snapshot_identifier = '%s-%s' % (
                     db_cluster['DBClusterIdentifier'], timestamp_format)
 
+            # What to do with the snapshot after taking it.
+            # If no encryption or non-default encryption, ready for sharing and copying
+            tag_key = 'shareAndCopy'
+            # If default encryption key used, re-encrypt first.
+            if db_cluster.get('KmsKeyId'):
+                kms_aliases = lookup_kms_aliases(db_cluster['KmsKeyId'])
+                if 'alias/aws/rds' in kms_aliases and SHARE_SNAPSHOTS == 'TRUE':
+                    tag_key = 'reEncrypt'
             try:
                 response = client.create_db_cluster_snapshot(
                     DBClusterSnapshotIdentifier=snapshot_identifier,
                     DBClusterIdentifier=db_cluster['DBClusterIdentifier'],
                     Tags=[{'Key': 'CreatedBy', 'Value': 'Snapshot Tool for Aurora'}, {
-                        'Key': 'CreatedOn', 'Value': timestamp_format}, {'Key': 'shareAndCopy', 'Value': 'YES'}]
+                        'Key': 'CreatedOn', 'Value': timestamp_format}, {'Key': tag_key, 'Value': 'YES'}]
                 )
             except Exception as e:
                 logger.error(e)
